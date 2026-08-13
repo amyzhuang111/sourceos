@@ -1,0 +1,372 @@
+// SourceOS data model.
+//
+// SQLite is used as the zero-config local datasource (per CLAUDE.md). SQLite
+// has no native list type, so fields documented as `x[]` in CLAUDE.md are
+// stored as Json here. Swapping to Postgres for production means changing
+// the datasource provider/url and converting those Json array fields to
+// native String[] (Prisma migration diff will show exactly what changes).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum CompanyStatus {
+  NEW
+  RESEARCHING
+  REVIEW
+  HIGH
+  MEDIUM
+  LOW
+  PASS
+  CONTACTED
+  MEETING
+  TRACKING
+  ARCHIVED
+}
+
+enum Stage {
+  PRE_SEED
+  SEED
+  SERIES_A
+  SERIES_B
+  SERIES_C_PLUS
+  GROWTH
+  UNKNOWN
+}
+
+enum SignalType {
+  FUNDING
+  LAUNCH
+  CUSTOMER
+  HIRING
+  TRAFFIC
+  FOUNDER
+  INVESTOR
+  PRODUCT
+  PARTNERSHIP
+  PRICING
+  TECHNICAL
+  OTHER
+}
+
+enum EvidenceType {
+  FACT
+  INFERENCE
+  USER_NOTE
+  USER_DECISION
+  AGENT_ANALYSIS
+}
+
+enum DecisionType {
+  HIGH
+  MEDIUM
+  LOW
+  PASS
+  CONTACT
+  MEET
+  TRACK
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PARTIAL
+}
+
+enum SourcingQueueStatus {
+  DISCOVERED
+  IDENTITY_RESOLVED
+  DEDUPED
+  LIGHT_ENRICHED
+  DISCOVERY_SCORED
+  RESEARCH_QUEUE
+  RESEARCHED
+  INVESTMENT_SCORED
+  USER_REVIEW
+  IDENTITY_AMBIGUOUS
+  SOURCE_BLOCKED
+  FETCH_FAILED
+  INSUFFICIENT_EVIDENCE
+  DUPLICATE
+  OUT_OF_SCOPE
+}
+
+// ---------------------------------------------------------------------------
+// Core entities
+// ---------------------------------------------------------------------------
+
+model Company {
+  id              String        @id @default(cuid())
+  name            String
+  canonicalDomain String        @unique
+  website         String?
+  description     String?
+  foundedYear     Int?
+  headquarters    String?
+  stage           Stage         @default(UNKNOWN)
+  sectors         Json?
+  subsectors      Json?
+  businessModel   String?
+  status          CompanyStatus @default(NEW)
+  priority        Float?
+
+  // Discovery / novelty tracking
+  firstSeenAt       DateTime            @default(now())
+  firstSeenSource   String?
+  firstSeenStrategy String?
+  discoveredBy      Json?
+  verifiedBy        Json?
+  contradictedBy    Json?
+  sourcingStatus    SourcingQueueStatus @default(DISCOVERED)
+
+  lastResearchedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  people            Person[]
+  fundingEvents     FundingEvent[]
+  signals           Signal[]
+  mentions          Mention[]
+  researchSnapshots ResearchSnapshot[]
+  scores            Score[]
+  decisions         Decision[]
+
+  @@index([status])
+  @@index([priority])
+}
+
+model Person {
+  id             String   @id @default(cuid())
+  name           String
+  role           String?
+  companyId      String?
+  company        Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  linkedinUrl    String?
+  xUrl           String?
+  personalUrl    String?
+  priorCompanies Json?
+  education      Json?
+  location       String?
+  notes          String?
+
+  mentions  Mention[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([companyId])
+}
+
+model FundingEvent {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  round       String?
+  amount      Float?
+  currency    String    @default("USD")
+  announcedAt DateTime?
+  investors   Json?
+  valuation   Float?
+  sourceUrl   String?
+  confidence  Float?
+  createdAt   DateTime  @default(now())
+
+  @@index([companyId])
+}
+
+model Signal {
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type        SignalType
+  title       String
+  value       String?
+  observedAt  DateTime
+  sourceUrl   String?
+  sourceName  String?
+  confidence  Float?
+  rawMetadata Json?
+  createdAt   DateTime   @default(now())
+
+  @@index([companyId])
+  @@index([type])
+}
+
+/// A mention is the append-only log of everything SourceOS learned, inferred,
+/// or the user decided. Never overwrite history merely because a newer
+/// mention exists — always insert a new row.
+model Mention {
+  id           String       @id @default(cuid())
+  companyId    String?
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  personId     String?
+  person       Person?      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  runId        String?
+  run          AgentRun?    @relation(fields: [runId], references: [id], onDelete: SetNull)
+  type         String
+  body         String
+  evidenceType EvidenceType
+  sourceUrl    String?
+  sourceTitle  String?
+  observedAt   DateTime
+  createdAt    DateTime     @default(now())
+  confidence   Float?
+  author       String
+
+  @@index([companyId])
+  @@index([personId])
+  @@index([runId])
+}
+
+/// Versioned research output. Never mutate an existing snapshot — write a
+/// new one with an incremented version.
+model ResearchSnapshot {
+  id             String   @id @default(cuid())
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  summary        String
+  problem        String?
+  product        String?
+  whyNow         String?
+  market         String?
+  traction       String?
+  founders       String?
+  competition    String?
+  technicalDepth String?
+  distribution   String?
+  risks          String?
+  openQuestions  Json?
+  evidence       Json?
+  generatedAt    DateTime @default(now())
+  model          String?
+  version        Int      @default(1)
+
+  scores Score[]
+
+  @@index([companyId])
+}
+
+/// Score components are stored separately rather than as one opaque number.
+/// Never present the weighted score as objective truth.
+model Score {
+  id                 String            @id @default(cuid())
+  companyId          String
+  company            Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  researchSnapshotId String?
+  researchSnapshot   ResearchSnapshot? @relation(fields: [researchSnapshotId], references: [id], onDelete: SetNull)
+
+  thesisFit             Float
+  founderQuality        Float
+  technicalDepth        Float
+  marketPotential       Float
+  timing                Float
+  traction              Float
+  differentiation       Float
+  distributionPotential Float
+  personalInterest      Float
+
+  weightedScore  Float
+  confidence     Float
+  reasoning      String?
+  scoringVersion Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model Thesis {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  positiveSignals Json?
+  negativeSignals Json?
+  preferredStages Json?
+  sectors         Json?
+  weights         Json?
+  hardExclusions  Json?
+  version         Int      @default(1)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Decision {
+  id        String       @id @default(cuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  decision  DecisionType
+  reason    String?
+  decidedAt DateTime     @default(now())
+  createdAt DateTime     @default(now())
+
+  @@index([companyId])
+}
+
+/// Agents may propose changes to taste but must never activate them
+/// automatically — a human always accepts or rejects.
+model TasteProposal {
+  id                   String         @id @default(cuid())
+  proposedChange       String
+  proposedChangeDetail Json?
+  supportingDecisions  Json?
+  counterExamples      Json?
+  confidence           Float?
+  status               ProposalStatus @default(PENDING)
+  createdAt            DateTime       @default(now())
+  resolvedAt           DateTime?
+}
+
+/// Agentically-proposed additions to the source registry. Never enabled
+/// automatically — requires user approval.
+model SourceProposal {
+  id                  String         @id @default(cuid())
+  sourceName          String
+  url                 String?
+  category            String?
+  rationale           String?
+  companiesDiscovered Json?
+  proposedTier        String?
+  proposedCadence     String?
+  accessMethod        String?
+  risks               String?
+  status              ProposalStatus @default(PENDING)
+  createdAt           DateTime       @default(now())
+}
+
+/// Every automated action must be traceable back to a run.
+model AgentRun {
+  id               String         @id @default(cuid())
+  agent            String
+  task             String?
+  status           AgentRunStatus @default(QUEUED)
+  startedAt        DateTime       @default(now())
+  completedAt      DateTime?
+  inputs           Json?
+  outputs          Json?
+  errors           Json?
+  model            String?
+  promptTokens     Int?
+  completionTokens Int?
+  costUsd          Float?
+
+  mentions Mention[]
+
+  @@index([agent])
+  @@index([status])
+}
