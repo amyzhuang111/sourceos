@@ -1,10 +1,11 @@
 // SourceOS data model.
 //
-// SQLite is used as the zero-config local datasource (per CLAUDE.md). SQLite
-// has no native list type, so fields documented as `x[]` in CLAUDE.md are
-// stored as Json here. Swapping to Postgres for production means changing
-// the datasource provider/url and converting those Json array fields to
-// native String[] (Prisma migration diff will show exactly what changes).
+// Postgres (Neon, provisioned via Vercel's marketplace integration). Fields
+// documented as `x[]` in CLAUDE.md are native String[] columns here — the
+// SQLite-era version of this schema stored them as Json because SQLite has
+// no native list type; that workaround is gone now that we're on real
+// Postgres. Object-shaped fields (evidence items, thesis weights, arbitrary
+// run inputs/outputs) remain Json, since those were never simple arrays.
 
 generator client {
   provider = "prisma-client"
@@ -12,7 +13,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // ---------------------------------------------------------------------------
@@ -121,8 +122,8 @@ model Company {
   foundedYear     Int?
   headquarters    String?
   stage           Stage         @default(UNKNOWN)
-  sectors         Json?
-  subsectors      Json?
+  sectors         String[]      @default([])
+  subsectors      String[]      @default([])
   businessModel   String?
   status          CompanyStatus @default(NEW)
   priority        Float?
@@ -131,9 +132,9 @@ model Company {
   firstSeenAt       DateTime            @default(now())
   firstSeenSource   String?
   firstSeenStrategy String?
-  discoveredBy      Json?
-  verifiedBy        Json?
-  contradictedBy    Json?
+  discoveredBy      String[]            @default([])
+  verifiedBy        String[]            @default([])
+  contradictedBy    String[]            @default([])
   sourcingStatus    SourcingQueueStatus @default(DISCOVERED)
 
   lastResearchedAt DateTime?
@@ -161,8 +162,8 @@ model Person {
   linkedinUrl    String?
   xUrl           String?
   personalUrl    String?
-  priorCompanies Json?
-  education      Json?
+  priorCompanies String[] @default([])
+  education      String[] @default([])
   location       String?
   notes          String?
 
@@ -181,7 +182,7 @@ model FundingEvent {
   amount      Float?
   currency    String    @default("USD")
   announcedAt DateTime?
-  investors   Json?
+  investors   String[]  @default([])
   valuation   Float?
   sourceUrl   String?
   confidence  Float?
@@ -251,7 +252,7 @@ model ResearchSnapshot {
   technicalDepth String?
   distribution   String?
   risks          String?
-  openQuestions  Json?
+  openQuestions  String[] @default([])
   evidence       Json?
   generatedAt    DateTime @default(now())
   model          String?
@@ -294,12 +295,12 @@ model Thesis {
   id              String   @id @default(cuid())
   name            String
   description     String?
-  positiveSignals Json?
-  negativeSignals Json?
-  preferredStages Json?
-  sectors         Json?
+  positiveSignals String[] @default([])
+  negativeSignals String[] @default([])
+  preferredStages String[] @default([])
+  sectors         String[] @default([])
   weights         Json?
-  hardExclusions  Json?
+  hardExclusions  String[] @default([])
   version         Int      @default(1)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
@@ -324,8 +325,8 @@ model TasteProposal {
   id                   String         @id @default(cuid())
   proposedChange       String
   proposedChangeDetail Json?
-  supportingDecisions  Json?
-  counterExamples      Json?
+  supportingDecisions  String[]       @default([])
+  counterExamples      String[]       @default([])
   confidence           Float?
   status               ProposalStatus @default(PENDING)
   createdAt            DateTime       @default(now())
@@ -340,7 +341,7 @@ model SourceProposal {
   url                 String?
   category            String?
   rationale           String?
-  companiesDiscovered Json?
+  companiesDiscovered String[]       @default([])
   proposedTier        String?
   proposedCadence     String?
   accessMethod        String?

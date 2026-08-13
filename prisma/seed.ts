@@ -5,11 +5,15 @@
  * data. This seed must never be confused with sourced real-world
  * intelligence — every company name below is invented.
  */
+import { config } from "dotenv";
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
+
 import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { DEFAULT_THESIS } from "../config/default-thesis";
 
-const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL ?? "file:./dev.db" });
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const db = new PrismaClient({ adapter });
 
 async function ensureThesis() {
@@ -280,6 +284,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    // better-sqlite3 adapter closes synchronously with the process; nothing
-    // else to await here.
+    await db.$disconnect();
   });

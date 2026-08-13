@@ -38,7 +38,7 @@ flowchart LR
         Search["SearchProvider\nExa (optional) / manual"]
     end
 
-    DB[("SQLite via Prisma\nCompany, Mention, ResearchSnapshot,\nScore, Thesis, Decision, AgentRun")]
+    DB[("Postgres via Prisma\nCompany, Mention, ResearchSnapshot,\nScore, Thesis, Decision, AgentRun")]
 
     UI -->|"Server Actions"| Lib
     Create --> DB
@@ -59,16 +59,14 @@ component.
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in ANTHROPIC_API_KEY to enable research
-npm run db:migrate           # creates dev.db and applies the schema
+cp .env.example .env.local   # fill in DATABASE_URL and ANTHROPIC_API_KEY
+npm run db:migrate           # applies the schema to your Postgres database
 npm run db:seed              # default Thesis + 6 fictional demo companies
 npm run dev                  # http://localhost:3000
 ```
 
-The app boots and every page renders with **zero** environment variables
-set — `DATABASE_URL` defaults to `file:./dev.db` and every LLM/search-backed
-feature degrades to a clear in-app error instead of crashing. Only "Run
-research" actually needs `ANTHROPIC_API_KEY`.
+Requires a Postgres database (see [Database](#database) below) and, to
+enable "Run research", `ANTHROPIC_API_KEY`.
 
 ## Environment variables
 
@@ -76,22 +74,23 @@ See [.env.example](.env.example) for the full list with comments. Summary:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes (has a default) | SQLite file path, relative to the project root |
+| `DATABASE_URL` | Yes | Postgres connection string |
 | `ANTHROPIC_API_KEY` | Only for research/scoring | Powers company-analyst + thesis-matcher |
 | `ANTHROPIC_MODEL` | No | Defaults to `claude-sonnet-5` |
 | `EXA_API_KEY` | No | Optional web-search adapter; not called by anything yet |
 
 ## Database
 
-SQLite via Prisma, using the `better-sqlite3` driver adapter (Prisma 7
+Postgres via Prisma, using the `@prisma/adapter-pg` driver adapter (Prisma 7
 requires a driver adapter for the SQL provider workflow — see
-`src/lib/db/client.ts`). Production is meant to be Postgres eventually; the
-schema's SQLite-only quirk is documented at the top of
-`prisma/schema.prisma` (Json columns standing in for Postgres `String[]`
-arrays).
+`src/lib/db/client.ts`). Any Postgres works; in production this runs on
+[Neon](https://neon.tech), provisioned through Vercel's marketplace
+integration. List/array fields (sectors, signals, etc.) are native
+Postgres `String[]` columns; only genuinely object-shaped fields
+(evidence, thesis weights, agent run inputs/outputs) stay `Json`.
 
 ```bash
-npm run db:migrate   # apply schema changes, create dev.db if missing
+npm run db:migrate   # apply schema changes
 npm run db:seed      # idempotent — safe to re-run
 npm run db:studio    # browse the data
 ```
@@ -162,16 +161,16 @@ freshness/novelty factors, the sourcing-queue state machine (including that
 failure states are terminal), and every Zod schema an LLM call writes
 through. No integration or E2E tests yet (Phase 7, not built this session) —
 the manual intelligence loop has instead been verified by hand against the
-real SQLite database and the running dev server (see
+real Postgres database and the running dev server (see
 [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)).
 
 ## Deployment
 
-Not deployed. The app is a standard Next.js app (`npm run build && npm
-start`); the only deployment-specific decision left is swapping SQLite for a
-real Postgres instance (change `prisma/schema.prisma`'s datasource provider,
-regenerate, re-migrate) and setting `ANTHROPIC_API_KEY` in the target
-environment.
+Deployed on Vercel, backed by a Neon Postgres database provisioned through
+Vercel's marketplace integration. Standard Next.js deployment (`npm run
+build && npm start`) — the only things beyond a default Vercel deploy are
+`DATABASE_URL` (set by the Neon integration) and `ANTHROPIC_API_KEY` /
+`ANTHROPIC_MODEL` as project environment variables.
 
 ## Known limitations
 
